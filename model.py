@@ -1,93 +1,72 @@
 import pandas as pd
-import numpy as np  
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.preprocessing import LabelEncoder
-from sklearn.naive_bayes import CategoricalNB
+from sklearn.feature_extraction import FeatureHasher
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import matplotlib.pyplot as plt
 
-#load datasets
-df_main = pd.read_csv('./Data/dataset1000.csv')
-df_test = pd.read_csv('./Data/dataset100.csv')
+# ======================
+# 1️ Cargar datasets
+# ======================
+df_train = pd.read_csv('./Data/dataset10000.csv')  # Entrenamiento grande
+df_test = pd.read_csv('./Data/dataset1000.csv')    # Test grande
 
-#Define categorical columns 
 features_columns = ['Director', 'Production', 'User', 'Genre']
+target_column = 'Rank'
 
-# split features
-x = df_main[features_columns]  #features
-y = df_main['Rank']                 #target variable
+x_train = df_train[features_columns]
+y_train = df_train[target_column]
 
-#print(df_test.head())
+x_test = df_test[features_columns]
+y_test = df_test[target_column]
 
-
-#Transform categorical features to numerical
-def preprocess_data(df, label_encoders=None):
-    df_encoded = df.copy()
-    if label_encoders is None:
-        label_encoders = {}
-        for column in df_encoded.columns:
-            le = LabelEncoder()
-            df_encoded[column] = le.fit_transform(df_encoded[column])
-            label_encoders[column] = le
-    else:
-        for column in df_encoded.columns:
-            df_encoded[column] = label_encoders[column].transform(df_encoded[column])
-    return df_encoded, label_encoders
-
-
-def train_model(x_train, y_train):
-    model = MultinomialNB(alpha=0.5)
-    model.fit(x_train_encoded, y_train)
-    return model
+# ======================
+# 2️ Función Hashing Trick
+# ======================
+def hashing_transform(df, columns, n_features=2**12):
+    """
+    Convierte columnas categóricas en matriz dispersa usando Hashing Trick
+    n_features: número de columnas finales (2^12 = 4096)
+    alternate_sign=False asegura valores no negativos para MultinomialNB
+    """
+    hasher = FeatureHasher(n_features=n_features, input_type='string', alternate_sign=False)
     
+    # Combinar todas las columnas en strings "col=value"
+    combined = df[columns].astype(str).agg(lambda x: [f"{col}={val}" for col, val in zip(columns, x)], axis=1)
     
-def evaluate_model(model, x_evaluation, y_evaluation):
-    y_pred = model.predict(x_evaluation)
-    accuracy = accuracy_score(y_evaluation, y_pred)
-    return accuracy
-    
+    X_hashed = hasher.transform(combined)
+    return X_hashed
 
-def encode_test_data(df_test, label_encoders):
-    df_test_encoded = df_test.copy()
+# Transformar datasets
+X_train_hashed = hashing_transform(x_train, features_columns, n_features=2**12)
+X_test_hashed = hashing_transform(x_test, features_columns, n_features=2**12)
 
-    for column in label_encoders:
-        df_test_encoded[column] = label_encoders[column].transform(df_test_encoded[column])
-    return df_test_encoded
+# ======================
+# 3️ Entrenamiento MultinomialNB
+# ======================
+model = MultinomialNB(alpha=0.5)
+model.fit(X_train_hashed, y_train)
 
-#divide training (70%) and evaluation (30%) sets
-x_train, x_evaluation, y_train, y_evaluation = train_test_split(
-    x, y, test_size=0.3, stratify=y, random_state=42
-    )
+# ======================
+# 4️ Evaluación en test
+# ======================
+y_pred = model.predict(X_test_hashed)
 
-x_train_encoded, label_encoders = preprocess_data(x_train)
-x_evaluation_encoded, _ = preprocess_data(x_evaluation, label_encoders)
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Accuracy en test set grande: {accuracy:.3f}")
+print("\nReporte de clasificación:")
+print(classification_report(y_test, y_pred))
+print("\nMatriz de confusión:")
+print(confusion_matrix(y_test, y_pred))
 
-
-
-#train model
-model = train_model(x_train_encoded, y_train)
-
-# k-fold cv = folds
-# Within the training set (70%), the model is trained and evaluated 5 times:
-scores = cross_val_score(model, x_train_encoded, y_train, cv=5)
-print("Cross-validation mean accuracy:", np.mean(scores))
-
-#evaluate model
-y_pred = model.predict(x_evaluation_encoded)
-print("Accuracy:", accuracy_score(y_evaluation, y_pred))
-print(classification_report(y_evaluation, y_pred))
-print(confusion_matrix(y_evaluation, y_pred)) 
-
-print(f"\nCross-validation mean accuracy: {np.mean(scores):.3f}")
-print(f"Evaluation accuracy: {accuracy_score(y_evaluation, y_pred):.3f}")
-
-
-def show_stats(y_train):
-    print("Class distribution in training set:")
-    y_train.value_counts().plot(kind='bar')
-    plt.title("Distribución de clases en Rank")
+# ======================
+# 5️ Visualizar distribución de clases
+# ======================
+def show_class_distribution(y, title="Distribución de clases"):
+    y.value_counts().plot(kind='bar')
+    plt.title(title)
     plt.xlabel("Rank")
     plt.ylabel("Frecuencia")
     plt.show()
-show_stats(y_train)
+
+show_class_distribution(y_train, "Distribución de clases en dataset de entrenamiento")
+show_class_distribution(y_test, "Distribución de clases en dataset de test")
