@@ -1,2 +1,2 @@
 # ML-NB
-Modelo de Machine Learning que usa una tecnica de inferencia Bayesiana (Naive-Bayes) que le ayuda a predecir  mejor sus probabilídades
+Modelo de Machine Learning que usa una la tecnica de inferencia Bayesiana (Naive-Bayes) para predecir  mejor sus probabilídades.
