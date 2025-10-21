@@ -1,99 +1,109 @@
+# DATA MINNING PROYECT - NAIVE BAYES
+
 import pandas as pd
-from sklearn.feature_extraction import FeatureHasher
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+import numpy as np
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.naive_bayes import CategoricalNB
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Load data
-df_train = pd.read_csv('./Data/dataset1000.csv')  # Entrenamiento grande
-df_test = pd.read_csv('./Data/dataset100.csv')    # Test grande
 
+# Dataset sizes
+dataset_sizes = [22, 100, 1000, 10000, 100000]
+base_path = "./Data/dataset" 
+
+#Predicts rows and target
 features_columns = ['Director', 'Production', 'User', 'Genre']
 target_column = 'Rank'
 
-x_train = df_train[features_columns]
-y_train = df_train[target_column]
+# results storage
+results = []
 
-x_test = df_test[features_columns]
-y_test = df_test[target_column]
+# Function to determine dynamic n_splits
+def calculate_n_splits(y, max_splits=10):
+    # Ensure that each fold has at least 1 example per class
+    min_class_count = y.value_counts().min()
+    return min(min_class_count, max_splits)
 
+for size in dataset_sizes:
+    file_path = f"{base_path}{size}.csv"
+    print(f"\n=== Evaluating model with dataset of {size} records")
 
-# Hashing Trick function
-def hashing_transform(df, columns, n_features=2**12):
-    """
-    Convierte columnas categóricas en matriz dispersa usando Hashing Trick
-    n_features: número de columnas finales (2^12 = 4096)
-    alternate_sign=False asegura valores no negativos para MultinomialNB
-    """
-    hasher = FeatureHasher(n_features=n_features, input_type='string', alternate_sign=False)
-    
-    # Combinar todas las columnas en strings "col=value"
-    combined = df[columns].astype(str).agg(lambda x: [f"{col}={val}" for col, val in zip(columns, x)], axis=1)
-    
-    X_hashed = hasher.transform(combined)
-    return X_hashed
+    # Load dataset
+    df = pd.read_csv(file_path)
+    X = df[features_columns]
+    y = df[target_column]
 
-# Visualization functions
-def show_class_distribution(y, title="Distribución de clases"):
-    y.value_counts().plot(kind='bar')
-    plt.title(title)
-    plt.xlabel("Rank")
-    plt.ylabel("Frecuency")
-    plt.show()
+    # Categorical coding
+    encoder = OrdinalEncoder()
+    X_encoded = encoder.fit_transform(X)
 
-def plot_confusion_matrix(y_test, y_pred):
-    cm = confusion_matrix(y_test, y_pred)
-    plt.figure(figsize=(6,5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Greens')
-    plt.title('Matriz de confusión - Multinomial Naive Bayes')
-    plt.xlabel('Predicción')
-    plt.ylabel('Real Value')
-    plt.show()
+    n_splits = calculate_n_splits(y)
+    if n_splits < 2:
+        print("Dataset too small for K-Fold. Precision will be used on the entire dataset.")
+        model = CategoricalNB(alpha=1.0)
+        model.fit(X_encoded, y)
+        accuracy = model.score(X_encoded, y)
+        cv_scores = np.array([accuracy])
+    else:
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        model = CategoricalNB(alpha=1.0)
+        cv_scores = cross_val_score(model, X_encoded, y, cv=cv, scoring='accuracy')
 
-def plot_report(y_true, y_pred):
-    report = classification_report(y_true, y_pred, output_dict=True)
-    df_report = pd.DataFrame(report).transpose()
+    # Individual report of each fold
+    print(f"\Accuracy results by folds:")
+    for i, score in enumerate(cv_scores, 1):
+        print(f"Fold {i}: {score:.4f}")
 
-    df_report.iloc[:-3, :][['precision', 'recall', 'f1-score']].plot(kind='bar', figsize=(8,5))
-    plt.title('Performance per class - Multinomial Naive Bayes')
-    plt.ylabel('Valor')
-    plt.ylim(0, 1)
-    plt.xticks(rotation=0)
-    plt.show()
-"""
-def plot_model_comparison(models, X_test, y_test):
-    model_names = ['MultinomialNB', 'GaussianNB', 'CategoricalNB']
-    accuracies = [0.33, 0.29, 0.28]
+    mean_acc = cv_scores.mean()
+    std_acc = cv_scores.std()
+    print(f"\nMean accuracy: {mean_acc:.4f} | standard deviation: {std_acc:.4f}")
 
-    plt.bar(model_names, accuracies, color=['skyblue', 'lightcoral', 'lightgreen'])
-    plt.title('Comparación de precisión entre modelos')
+    results.append({
+        "Dataset_Size": size,
+        "Mean_Accuracy": mean_acc,
+        "Std_Accuracy": std_acc
+    })
+
+    # individual graphic
+    plt.figure(figsize=(7,4))
+    plt.bar(range(1, len(cv_scores)+1), cv_scores, color='#FF7F0E')
+    plt.axhline(y=mean_acc, color='blue', linestyle='--', label=f'Mean={mean_acc:.3f}')
+    plt.title(f'Accuracy per fold - Dataset {size}')
+    plt.xlabel('Fold')
     plt.ylabel('Accuracy')
     plt.ylim(0, 1)
+    plt.legend()
     plt.show()
-"""
 
-# Dataset transformation
-X_train_hashed = hashing_transform(x_train, features_columns, n_features=2**12)
-X_test_hashed = hashing_transform(x_test, features_columns, n_features=2**12)
+# Global Logarithmic Comparative Chart
 
-# Multinomial Naive Bayes model training
-model = MultinomialNB(alpha=0.5)
-model.fit(X_train_hashed, y_train)
+results_df = pd.DataFrame(results)
 
-# Evaluation at test set
-y_pred = model.predict(X_test_hashed)
+plt.figure(figsize=(8,5))
+sns.lineplot(
+    x="Dataset_Size",
+    y="Mean_Accuracy",
+    data=results_df,
+    marker="o",
+    color="#FF7F0E",
+    label="Mean accuracy"
+)
+plt.fill_between(
+    results_df["Dataset_Size"],
+    results_df["Mean_Accuracy"] - results_df["Std_Accuracy"],
+    results_df["Mean_Accuracy"] + results_df["Std_Accuracy"],
+    color='#AEC6CF',
+    alpha=0.4,
+    label="±1 standard deviation"
+)
 
-accuracy = accuracy_score(y_test, y_pred)
-print(f"Accuracy en test set grande: {accuracy:.3f}")
-print("\nReporte de clasificación:")
-print(classification_report(y_test, y_pred))
-print("\nMatriz de confusión:")
-print(confusion_matrix(y_test, y_pred))
-
-# Visualizar distribución de clases
-#show_class_distribution(y_train, "Distribución de clases en dataset de entrenamiento")
-#show_class_distribution(y_test, "Distribución de clases en dataset de test")
-
-plot_confusion_matrix(y_test, y_pred)
-plot_report(y_test, y_pred)
+plt.title("Comparison between the size of the dataset and its acuracy")
+plt.xlabel("Dataset size (logarithmic scale)")
+plt.ylabel("Mean Accuracy")
+plt.xscale('log')  # Escala logarítmica para eje X
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+plt.tight_layout()
+plt.show()
